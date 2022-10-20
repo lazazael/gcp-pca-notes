@@ -1,0 +1,22 @@
+gsp281-introduction_to_sql_for_bigquery_and_cloud_sql
+
+show the terminal on a new tab
+https://shell.cloud.google.com/?show=terminal
+set project ID
+gcloud config set project qwiklabs-gcp-02-4d920a8a3729
+
+run the following command in cloud shell to setup auth without opening up a browser
+gcloud auth login --no-launch-browser
+
+Run the following command to connect to your SQL instance, replacing qwiklabs-demo if you used a different name for your instance:
+gcloud sql connect qwiklabs-demo --user=root --quiet
+
+Run the following command at the MySQL server prompt to create a database called bike:
+CREATE DATABASE bike;
+
+USE bike;
+CREATE TABLE london1 (start_station_name VARCHAR(255), num INT);
+
+SELECT * FROM london1;
+SELECT * FROM london2;
+

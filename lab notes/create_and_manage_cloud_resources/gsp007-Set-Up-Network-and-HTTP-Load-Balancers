@@ -82,6 +82,7 @@ gcloud compute forwarding-rules create www-rule \
     --address network-lb-ip-1 \
     --target-pool www-pool
 
+
 4. sending traffic to your instances
 view the external IP address of the www-rule forwarding rule used by the load balancer
 gcloud compute forwarding-rules describe www-rule --region us-east5
