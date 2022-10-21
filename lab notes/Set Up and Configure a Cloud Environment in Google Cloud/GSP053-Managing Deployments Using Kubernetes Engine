@@ -1,0 +1,248 @@
+Various business and technical challenges can arise in deployments that are limited to a single environment or region:
+
+    Maxed out resources: In any single environment, particularly in on-premises environments, you might not have the compute, networking, and storage resources to meet your production needs.
+    Limited geographic reach: Deployments in a single environment require people who are geographically distant from one another to access one deployment. Their traffic might travel around the world to a central location.
+    Limited availability: Web-scale traffic patterns challenge applications to remain fault-tolerant and resilient.
+    Vendor lock-in: Vendor-level platform and infrastructure abstractions can prevent you from porting applications.
+    Inflexible resources: Your resources might be limited to a particular set of compute, storage, or networking offerings.
+
+gcloud auth list
+gcloud config list project
+gcloud config set compute/zone us-east5-c
+
+
+Get the sample code for creating and running containers and deployments:
+gsutil -m cp -r gs://spls/gsp053/orchestrate-with-kubernetes .
+
+Create a cluster with 3 nodes (this will take a few minutes to complete):
+cd orchestrate-with-kubernetes/kubernetes
+gcloud container clusters create bootcamp \
+  --machine-type e2-small \
+  --num-nodes 3 \
+  --scopes "https://www.googleapis.com/auth/projecthosting,storage-rw"
+
+The explain command in kubectl can tell us about the deployment object:
+kubectl explain deployment
+We can also see all of the fields using the --recursive option:
+kubectl explain deployment --recursive
+You can use the explain command as you go through the lab to help you understand the structure of a deployment object and understand what the individual fields do:
+kubectl explain deployment.metadata.name
+
+Update the deployments/auth.yaml configuration file:
+vi deployments/auth.yaml
+i
+edit in:
+...
+containers:
+- name: auth
+  image: "kelseyhightower/auth:1.0.0"
+...
+:wq
+cat deployments/auth.yaml
+
+Go ahead and create your deployment object using kubectl create
+kubectl create -f deployments/auth.yaml
+Once you have created the deployment, you can verify that it was created:
+kubectl get deployments
+verify that the replica set was created:
+kubectl get replicasets
+Finally, we can view the Pods that were created as part of our deployment. The single Pod is created by the Kubernetes when the ReplicaSet is created:
+kubectl get pods
+
+It's time to create a service for our auth deployment. You've already seen service manifest files, so we won't go into the details here.
+
+    Use the kubectl create command to create the auth service:
+
+kubectl create -f services/auth.yaml
+
+
+
+Now, do the same thing to create and expose the hello deployment:
+
+kubectl create -f deployments/hello.yaml
+kubectl create -f services/hello.yaml
+
+
+
+And one more time to create and expose the frontend deployment:
+
+kubectl create secret generic tls-certs --from-file tls/
+kubectl create configmap nginx-frontend-conf --from-file=nginx/frontend.conf
+kubectl create -f deployments/frontend.yaml
+kubectl create -f services/frontend.yaml
+Note: You created a ConfigMap for the frontend.
+
+
+
+Interact with the frontend by grabbing its external IP and then curling to it:
+
+kubectl get services frontend
+curl -ks https://<EXTERNAL-IP>
+
+
+
+You can also use the output templating feature of kubectl to use curl as a one-liner:
+
+curl -ks https://`kubectl get svc frontend -o=jsonpath="{.status.loadBalancer.ingress[0].ip}"`
+
+Now that we have a deployment created, we can scale it. Do this by updating the spec.replicas field.
+kubectl explain deployment.spec.replicas
+
+
+
+The replicas field can be most easily updated using the kubectl scale command:
+
+kubectl scale deployment hello --replicas=5
+
+After the deployment is updated, Kubernetes will automatically update the associated ReplicaSet and start new Pods to make the total number of Pods equal 5.
+
+Verify that there are now 5 hello Pods running:
+kubectl get pods | grep hello- | wc -l
+
+Now scale back the application:
+kubectl scale deployment hello --replicas=3
+
+Again, verify that you have the correct number of Pods:
+kubectl get pods | grep hello- | wc -l
+
+Deployments support updating images to a new version through a rolling update mechanism. When a deployment is updated with a new version, it creates a new ReplicaSet and slowly increases the number of replicas in the new ReplicaSet as it decreases the replicas in the old ReplicaSet.
+
+Trigger a rolling update
+
+    To update your deployment, run the following command:
+
+kubectl edit deployment hello
+
+Change the image in the containers section of the deployment to the following:
+...
+containers:
+  image: kelseyhightower/hello:2.0.0
+...
+Once you save out of the editor, the updated deployment will be saved to your cluster and Kubernetes will begin a rolling update.
+
+    See the new ReplicaSet that Kubernetes creates.:
+
+kubectl get replicaset
+
+You can also see a new entry in the rollout history:
+kubectl rollout history deployment/hello
+
+If you detect problems with a running rollout, pause it to stop the update.
+kubectl rollout pause deployment/hello
+
+Verify the current state of the rollout:
+kubectl rollout status deployment/hello
+
+You can also verify this on the Pods directly:
+kubectl get pods -o jsonpath --template='{range .items[*]}{.metadata.name}{"\t"}{"\t"}{.spec.containers[0].image}{"\n"}{end}'
+
+Resume a rolling update
+
+The rollout is paused which means that some pods are at the new version and some pods are at the older version.
+
+    We can continue the rollout using the resume command:
+kubectl rollout resume deployment/hello
+
+When the rollout is complete, you should see the following when running the status command:
+kubectl rollout status deployment/hello
+
+Rollback an update
+
+Assume that a bug was detected in your new version. Since the new version is presumed to have problems, any users connected to the new Pods will experience those issues.
+
+You will want to roll back to the previous version so you can investigate and then release a version that is fixed properly.
+
+    Use the rollout command to roll back to the previous version:
+
+kubectl rollout undo deployment/hello
+
+Verify the roll back in the history:
+kubectl rollout history deployment/hello
+
+Finally, verify that all the Pods have rolled back to their previous versions:
+kubectl get pods -o jsonpath --template='{range .items[*]}{.metadata.name}{"\t"}{"\t"}{.spec.containers[0].image}{"\n"}{end}'
+
+Task 4. Canary deployments
+
+When you want to test a new deployment in production with a subset of your users, use a canary deployment. Canary deployments allow you to release a change to a small subset of your users to mitigate risk associated with new releases.
+Create a canary deployment
+
+A canary deployment consists of a separate deployment with your new version and a service that targets both your normal, stable deployment as well as your canary deployment.
+
+
+
+    First, create a new canary deployment for the new version:
+cat deployments/hello-canary.yaml
+
+
+
+    Now create the canary deployment:
+kubectl create -f deployments/hello-canary.yaml
+
+After the canary deployment is created, you should have two deployments, hello and hello-canary. Verify it with this kubectl command:
+kubectl get deployments
+
+curl -ks https://`kubectl get svc frontend -o=jsonpath="{.status.loadBalancer.ingress[0].ip}"`/version
+
+session affinity
+A use case could be that the UI for an application changed, and you don't want to confuse the user. In a case like this, you want the user to "stick" to one deployment or the other.
+You can do this by creating a service with session affinity. This way the same user will always be served from the same version. In the example below the service is the same as before, but a new sessionAffinity field has been added, and set to ClientIP. All clients with the same IP address will have their requests sent to the same version of the hello application.
+
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: "hello"
+spec:
+  sessionAffinity: ClientIP
+  selector:
+    app: "hello"
+  ports:
+    - protocol: "TCP"
+      port: 80
+      targetPort: 80
+
+
+Blue-green deployments
+Rolling updates are ideal because they allow you to deploy an application slowly with minimal overhead, minimal performance impact, and minimal downtime. There are instances where it is beneficial to modify the load balancers to point to that new version only after it has been fully deployed. In this case, blue-green deployments are the way to go.
+
+Kubernetes achieves this by creating two separate deployments; one for the old "blue" version and one for the new "green" version. Use your existing hello deployment for the "blue" version. The deployments will be accessed via a Service which will act as the router. Once the new "green" version is up and running, you'll switch over to using that version by updating the Service.
+A major downside of blue-green deployments is that you will need to have at least 2x the resources in your cluster necessary to host your application. Make sure you have enough resources in your cluster before deploying both versions of the application at once.
+
+Use the existing hello service, but update it so that it has a selector app:hello, version: 1.0.0. The selector will match the existing "blue" deployment. But it will not match the "green" deployment because it will use a different version.
+
+First update the service:
+kubectl apply -f services/hello-blue.yaml
+Updating using Blue-Green deployment
+
+In order to support a blue-green deployment style, we will create a new "green" deployment for our new version. The green deployment updates the version label and the image path.
+
+kubectl create -f deployments/hello-green.yaml
+Once you have a green deployment and it has started up properly, verify that the current version of 1.0.0 is still being used:
+curl -ks https://`kubectl get svc frontend -o=jsonpath="{.status.loadBalancer.ingress[0].ip}"`/version
+
+
+
+    Now, update the service to point to the new version:
+
+kubectl apply -f services/hello-green.yaml
+
+When the service is updated, the "green" deployment will be used immediately. You can now verify that the new version is always being used:
+
+curl -ks https://`kubectl get svc frontend -o=jsonpath="{.status.loadBalancer.ingress[0].ip}"`/version
+
+Blue-Green rollback
+
+If necessary, you can roll back to the old version in the same way.
+
+    While the "blue" deployment is still running, just update the service back to the old version:
+
+kubectl apply -f services/hello-blue.yaml
+
+Once you have updated the service, your rollback will have been successful. Again, verify that the right version is now being used:
+curl -ks https://`kubectl get svc frontend -o=jsonpath="{.status.loadBalancer.ingress[0].ip}"`/version
+
+
+
+
+
